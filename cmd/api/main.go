@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/denesis0-0/booking-platform-api/internal/config"
@@ -15,6 +16,16 @@ type HealthResponse struct {
 	Status   string `json:"status"`
 	App      string `json:"app"`
 	Database string `json:"database"`
+}
+
+type CreateResourceRequest struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
 }
 
 func main() {
@@ -32,6 +43,14 @@ func main() {
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		healthHandler(w, r, db)
+	})
+
+	mux.HandleFunc("POST /resources", func(w http.ResponseWriter, r *http.Request) {
+		createResourceHandler(w, r, db)
+	})
+
+	mux.HandleFunc("GET /resources", func(w http.ResponseWriter, r *http.Request) {
+		listResourcesHandler(w, r, db)
 	})
 
 	addr := ":" + cfg.Port
@@ -62,11 +81,67 @@ func healthHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres)
 		Database: databaseStatus,
 	}
 
+	writeJSON(w, statusCode, response)
+}
+
+func createResourceHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	var request CreateResourceRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	request.Name = strings.TrimSpace(request.Name)
+	request.Type = strings.TrimSpace(request.Type)
+	request.Description = strings.TrimSpace(request.Description)
+
+	if request.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	if request.Type == "" {
+		writeError(w, http.StatusBadRequest, "type is required")
+		return
+	}
+
+	resource, err := db.CreateResource(r.Context(), storage.CreateResourceParams{
+		Name:        request.Name,
+		Type:        request.Type,
+		Description: request.Description,
+	})
+	if err != nil {
+		log.Printf("failed to create resource: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to create resource")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, resource)
+}
+
+func listResourcesHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	resources, err := db.ListResources(r.Context())
+	if err != nil {
+		log.Printf("failed to list resources: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list resources")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resources)
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
-	err := json.NewEncoder(w).Encode(response)
-	if err != nil {
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		log.Printf("failed to encode json response: %v", err)
 	}
+}
+
+func writeError(w http.ResponseWriter, statusCode int, message string) {
+	writeJSON(w, statusCode, ErrorResponse{
+		Error: message,
+	})
 }
