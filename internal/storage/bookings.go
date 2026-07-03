@@ -9,6 +9,7 @@ import (
 )
 
 var ErrSlotAlreadyBooked = errors.New("slot already booked")
+var ErrBookingNotFound = errors.New("booking not found")
 
 type Booking struct {
 	ID        string    `json:"id"`
@@ -94,4 +95,33 @@ func (p *Postgres) ListBookings(ctx context.Context) ([]Booking, error) {
 	}
 
 	return bookings, nil
+}
+
+func (p *Postgres) CancelBooking(ctx context.Context, bookingID string) (Booking, error) {
+	query := `
+		UPDATE bookings
+		SET status = 'cancelled'
+		WHERE id = $1::uuid AND status = 'confirmed'
+		RETURNING id::text, slot_id::text, user_name, status, created_at
+	`
+
+	var booking Booking
+
+	err := p.Pool.QueryRow(ctx, query, bookingID).Scan(
+		&booking.ID,
+		&booking.SlotID,
+		&booking.UserName,
+		&booking.Status,
+		&booking.CreatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Booking{}, ErrBookingNotFound
+		}
+
+		return Booking{}, err
+	}
+
+	return booking, nil
 }

@@ -80,6 +80,10 @@ func main() {
 		listBookingsHandler(w, r, db)
 	})
 
+	mux.HandleFunc("DELETE /bookings/{booking_id}", func(w http.ResponseWriter, r *http.Request) {
+		cancelBookingHandler(w, r, db)
+	})
+
 	addr := ":" + cfg.Port
 
 	log.Printf("server started on http://localhost%s", addr)
@@ -281,6 +285,28 @@ func listBookingsHandler(w http.ResponseWriter, r *http.Request, db *storage.Pos
 	}
 
 	writeJSON(w, http.StatusOK, bookings)
+}
+
+func cancelBookingHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	bookingID := r.PathValue("booking_id")
+	if strings.TrimSpace(bookingID) == "" {
+		writeError(w, http.StatusBadRequest, "booking_id is required")
+		return
+	}
+
+	booking, err := db.CancelBooking(r.Context(), bookingID)
+	if err != nil {
+		if errors.Is(err, storage.ErrBookingNotFound) {
+			writeError(w, http.StatusNotFound, "booking not found")
+			return
+		}
+
+		log.Printf("failed to cancel booking: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to cancel booking")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, booking)
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, data any) {
