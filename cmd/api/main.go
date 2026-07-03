@@ -72,6 +72,10 @@ func main() {
 		listSlotsHandler(w, r, db)
 	})
 
+	mux.HandleFunc("GET /resources/{resource_id}/available-slots", func(w http.ResponseWriter, r *http.Request) {
+		listAvailableSlotsHandler(w, r, db)
+	})
+
 	mux.HandleFunc("POST /bookings", func(w http.ResponseWriter, r *http.Request) {
 		createBookingHandler(w, r, db)
 	})
@@ -231,6 +235,23 @@ func listSlotsHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgr
 	if err != nil {
 		log.Printf("failed to list slots: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to list slots")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, slots)
+}
+
+func listAvailableSlotsHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	resourceID := r.PathValue("resource_id")
+	if strings.TrimSpace(resourceID) == "" {
+		writeError(w, http.StatusBadRequest, "resource_id is required")
+		return
+	}
+
+	slots, err := db.ListAvailableSlotsByResource(r.Context(), resourceID)
+	if err != nil {
+		log.Printf("failed to list available slots: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list available slots")
 		return
 	}
 
