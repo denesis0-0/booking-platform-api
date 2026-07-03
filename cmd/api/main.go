@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"strings"
@@ -27,6 +28,11 @@ type CreateResourceRequest struct {
 type CreateSlotRequest struct {
 	StartsAt string `json:"starts_at"`
 	EndsAt   string `json:"ends_at"`
+}
+
+type CreateBookingRequest struct {
+	SlotID   string `json:"slot_id"`
+	UserName string `json:"user_name"`
 }
 
 type ErrorResponse struct {
@@ -64,6 +70,14 @@ func main() {
 
 	mux.HandleFunc("GET /resources/{resource_id}/slots", func(w http.ResponseWriter, r *http.Request) {
 		listSlotsHandler(w, r, db)
+	})
+
+	mux.HandleFunc("POST /bookings", func(w http.ResponseWriter, r *http.Request) {
+		createBookingHandler(w, r, db)
+	})
+
+	mux.HandleFunc("GET /bookings", func(w http.ResponseWriter, r *http.Request) {
+		listBookingsHandler(w, r, db)
 	})
 
 	addr := ":" + cfg.Port
@@ -217,6 +231,56 @@ func listSlotsHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgr
 	}
 
 	writeJSON(w, http.StatusOK, slots)
+}
+
+func createBookingHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	var request CreateBookingRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	request.SlotID = strings.TrimSpace(request.SlotID)
+	request.UserName = strings.TrimSpace(request.UserName)
+
+	if request.SlotID == "" {
+		writeError(w, http.StatusBadRequest, "slot_id is required")
+		return
+	}
+
+	if request.UserName == "" {
+		writeError(w, http.StatusBadRequest, "user_name is required")
+		return
+	}
+
+	booking, err := db.CreateBooking(r.Context(), storage.CreateBookingParams{
+		SlotID:   request.SlotID,
+		UserName: request.UserName,
+	})
+	if err != nil {
+		if errors.Is(err, storage.ErrSlotAlreadyBooked) {
+			writeError(w, http.StatusConflict, "slot already booked")
+			return
+		}
+
+		log.Printf("failed to create booking: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to create booking")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, booking)
+}
+
+func listBookingsHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	bookings, err := db.ListBookings(r.Context())
+	if err != nil {
+		log.Printf("failed to list bookings: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list bookings")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, bookings)
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, data any) {
