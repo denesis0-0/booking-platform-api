@@ -24,6 +24,11 @@ type CreateResourceRequest struct {
 	Description string `json:"description"`
 }
 
+type CreateSlotRequest struct {
+	StartsAt string `json:"starts_at"`
+	EndsAt   string `json:"ends_at"`
+}
+
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
@@ -51,6 +56,14 @@ func main() {
 
 	mux.HandleFunc("GET /resources", func(w http.ResponseWriter, r *http.Request) {
 		listResourcesHandler(w, r, db)
+	})
+
+	mux.HandleFunc("POST /resources/{resource_id}/slots", func(w http.ResponseWriter, r *http.Request) {
+		createSlotHandler(w, r, db)
+	})
+
+	mux.HandleFunc("GET /resources/{resource_id}/slots", func(w http.ResponseWriter, r *http.Request) {
+		listSlotsHandler(w, r, db)
 	})
 
 	addr := ":" + cfg.Port
@@ -129,6 +142,81 @@ func listResourcesHandler(w http.ResponseWriter, r *http.Request, db *storage.Po
 	}
 
 	writeJSON(w, http.StatusOK, resources)
+}
+
+func createSlotHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	resourceID := r.PathValue("resource_id")
+	if strings.TrimSpace(resourceID) == "" {
+		writeError(w, http.StatusBadRequest, "resource_id is required")
+		return
+	}
+
+	var request CreateSlotRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid json body")
+		return
+	}
+
+	request.StartsAt = strings.TrimSpace(request.StartsAt)
+	request.EndsAt = strings.TrimSpace(request.EndsAt)
+
+	if request.StartsAt == "" {
+		writeError(w, http.StatusBadRequest, "starts_at is required")
+		return
+	}
+
+	if request.EndsAt == "" {
+		writeError(w, http.StatusBadRequest, "ends_at is required")
+		return
+	}
+
+	startsAt, err := time.Parse(time.RFC3339, request.StartsAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "starts_at must be in RFC3339 format")
+		return
+	}
+
+	endsAt, err := time.Parse(time.RFC3339, request.EndsAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "ends_at must be in RFC3339 format")
+		return
+	}
+
+	if !endsAt.After(startsAt) {
+		writeError(w, http.StatusBadRequest, "ends_at must be after starts_at")
+		return
+	}
+
+	slot, err := db.CreateSlot(r.Context(), storage.CreateSlotParams{
+		ResourceID: resourceID,
+		StartsAt:   startsAt,
+		EndsAt:     endsAt,
+	})
+	if err != nil {
+		log.Printf("failed to create slot: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to create slot")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, slot)
+}
+
+func listSlotsHandler(w http.ResponseWriter, r *http.Request, db *storage.Postgres) {
+	resourceID := r.PathValue("resource_id")
+	if strings.TrimSpace(resourceID) == "" {
+		writeError(w, http.StatusBadRequest, "resource_id is required")
+		return
+	}
+
+	slots, err := db.ListSlotsByResource(r.Context(), resourceID)
+	if err != nil {
+		log.Printf("failed to list slots: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to list slots")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, slots)
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, data any) {
