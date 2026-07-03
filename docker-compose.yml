@@ -30,5 +30,17 @@ services:
       postgres:
         condition: service_healthy
 
+  swagger-ui:
+    image: swaggerapi/swagger-ui
+    container_name: booking-platform-swagger-ui
+    environment:
+      SWAGGER_JSON: /docs/openapi.yaml
+    ports:
+      - "8082:8080"
+    volumes:
+      - ./docs:/docs
+    depends_on:
+      - api
+
 volumes:
   booking_postgres_data:
